@@ -72,6 +72,41 @@ async def search_grants(
         except Exception as exc:
             errors.append(f"{label.upper()} search failed: {exc}")
 
+    # Deduplicate by grant ID
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for r in results:
+        if r["grant_id"] not in seen:
+            seen.add(r["grant_id"])
+            deduped.append(r)
+    results = deduped
+
+    # Relevance filter: keyword must appear in title, OR all keyword words in abstract
+    keywords = [w.lower() for w in keyword.split() if len(w) > 3]
+    if keywords:
+        def is_relevant(r: dict) -> bool:
+            title = r["title"].lower()
+            abstract = (r["abstract"] or "").lower()
+            if any(kw in title for kw in keywords):
+                return True
+            return all(kw in abstract for kw in keywords)
+
+        filtered = [r for r in results if is_relevant(r)]
+        removed_count = len(results) - len(filtered)
+        if filtered:
+            results = filtered
+            if removed_count > 0:
+                errors.append(
+                    f"{removed_count} low-relevance result(s) filtered out "
+                    f"(keyword not found in title or abstract)."
+                )
+        else:
+            # Nothing passed — keep all but warn
+            errors.append(
+                "Relevance filter removed all results — showing unfiltered matches. "
+                "Results may be loosely related to your keyword."
+            )
+
     if not results and not errors:
         return f"No grants found for **{keyword}** in {year}."
 
