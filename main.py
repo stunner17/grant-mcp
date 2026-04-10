@@ -299,18 +299,32 @@ async def search_by_institution(
         note = ("\n\n" + "\n".join(f"- {e}" for e in errors)) if errors else ""
         return f"No grants found for **{institution_name}** in {year}.{note}"
 
-    # Post-filter: only keep results where institution name loosely matches
-    name_words = [w.lower() for w in institution_name.split() if len(w) > 3]
-    if name_words:
+    # Post-filter: keep only results whose institution matches the search name.
+    # Skip common academic words that appear in many university names.
+    COMMON_WORDS = {
+        "university", "institute", "college", "school", "technology",
+        "research", "center", "national", "the", "and", "for", "of",
+        "sciences", "science", "studies", "health", "medical", "state",
+    }
+    distinctive = [
+        w.lower() for w in institution_name.split()
+        if len(w) > 3 and w.lower() not in COMMON_WORDS
+    ]
+    if distinctive:
         matched = [
             r for r in results
-            if any(w in (r.get("institution") or "").lower() for w in name_words)
+            if any(w in (r.get("institution") or "").lower() for w in distinctive)
         ]
         if matched:
             removed = len(results) - len(matched)
             results = matched
             if removed > 0:
                 errors.append(f"{removed} result(s) from other institutions filtered out.")
+        else:
+            errors.append(
+                f"Could not confirm institution match — showing all returned results. "
+                f"Some may not be from {institution_name}."
+            )
 
     total = sum(r["amount"] or 0 for r in results)
     # Group by department where available
