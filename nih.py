@@ -4,7 +4,7 @@ import asyncio
 import httpx
 from typing import Any
 
-BASE_URL = "https://reporter.nih.gov/api/v2/projects/search"
+BASE_URL = "https://api.reporter.nih.gov/v2/projects/search"
 
 DEFAULT_FIELDS = [
     "project_title",
@@ -34,10 +34,15 @@ def _pi_names(pi_list: list[dict] | None) -> str:
         return "N/A"
     names = []
     for pi in pi_list:
-        first = pi.get("first_name", "")
-        last = pi.get("last_name", "")
-        names.append(f"{first} {last}".strip())
-    return ", ".join(names) if names else "N/A"
+        # v2 API returns full_name or first_name/last_name
+        full = pi.get("full_name", "").strip()
+        if full:
+            names.append(full)
+        else:
+            first = pi.get("first_name", "")
+            last = pi.get("last_name", "")
+            names.append(f"{first} {last}".strip())
+    return ", ".join(n for n in names if n) or "N/A"
 
 
 async def _post_with_retry(payload: dict, retries: int = 3) -> dict:
@@ -114,14 +119,22 @@ async def search(
     results = data.get("results", [])
     parsed = []
     for r in results:
+        # API returns principal_investigators list
+        pi = _pi_names(
+            r.get("principal_investigators") or r.get("pi_names")
+        )
+        # org may be nested object or flat field
+        org = r.get("organization", {}) or {}
+        institution = org.get("org_name") or r.get("org_name", "N/A")
+
         parsed.append(
             {
                 "source": "NIH",
                 "grant_id": r.get("project_num", "N/A"),
                 "title": r.get("project_title", "N/A"),
-                "pi": _pi_names(r.get("pi_names")),
-                "institution": r.get("org_name", "N/A"),
-                "department": r.get("department", "N/A"),
+                "pi": pi,
+                "institution": institution,
+                "department": org.get("dept_type") or r.get("department", "N/A"),
                 "amount": r.get("award_amount"),
                 "year": r.get("fiscal_year"),
                 "abstract": r.get("abstract_text", ""),
