@@ -1,10 +1,11 @@
 """
 Grant & Funding Discovery MCP Server
-Searches NIH Reporter, NSF Awards, and Grants.gov via plain-English queries.
+Searches NIH, NSF, DOE, USDA, NASA, DARPA, and Grants.gov via plain-English queries.
 Run: uvicorn main:app --host 0.0.0.0 --port 8000
 """
 
 import asyncio
+from typing import Any
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -13,9 +14,10 @@ from starlette.routing import Route
 import nih
 import nsf
 import grants_gov
+import usaspending
 import formatters
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 TOOLS = [
     "search_grants",
     "get_grant_details",
@@ -25,11 +27,14 @@ TOOLS = [
     "get_funding_trends",
 ]
 
+# Agencies served via USASpending
+USA_AGENCIES = {"doe", "usda", "nasa", "darpa"}
+
 mcp = FastMCP(
     name="Grant & Funding Discovery",
     version=VERSION,
     instructions=(
-        "Search for research grants from NIH, NSF, and Grants.gov. "
+        "Search for research grants from NIH, NSF, DOE, USDA, NASA, DARPA, and Grants.gov. "
         "Use search_grants for keyword discovery, get_grant_details for full info, "
         "search_by_pi for a researcher's portfolio, search_by_institution for org-level data, "
         "find_open_opportunities for active funding calls, and get_funding_trends for trend analysis."
@@ -52,25 +57,30 @@ async def search_grants(
 
     Args:
         keyword: Topic or subject to search (e.g. "mRNA vaccines", "climate change")
-        agency:  Source to search — "all", "nih", "nsf", or "grants_gov" (default: "all")
+        agency:  Source to search — "all", "nih", "nsf", "doe", "usda", "nasa", "darpa" (default: "all")
         year:    Fiscal/award year to filter by (default: 2024)
         limit:   Max results per source (default: 10)
     """
     agency = agency.lower()
-    tasks = []
     errors: list[str] = []
 
+    # Determine which USASpending agencies to query
+    usa_targets = [a for a in USA_AGENCIES if agency in ("all", a)]
+
+    coros: list[tuple[str, Any]] = []
     if agency in ("all", "nih"):
-        tasks.append(("nih", nih.search(keyword, fiscal_years=[year], limit=limit)))
+        coros.append(("NIH", nih.search(keyword, fiscal_years=[year], limit=limit)))
     if agency in ("all", "nsf"):
-        tasks.append(("nsf", nsf.search(keyword, year=year, limit=limit)))
+        coros.append(("NSF", nsf.search(keyword, year=year, limit=limit)))
+    if usa_targets:
+        coros.append(("USASpending", usaspending.search(keyword, agencies=usa_targets, year=year, limit=limit)))
 
     results: list[dict] = []
-    for label, coro in tasks:
+    for label, coro in coros:
         try:
             results.extend(await coro)
         except Exception as exc:
-            errors.append(f"{label.upper()} search failed: {exc}")
+            errors.append(f"{label} search failed: {exc}")
 
     # Deduplicate by grant ID
     seen: set[str] = set()
@@ -111,12 +121,15 @@ async def search_grants(
         return f"No grants found for **{keyword}** in {year}."
 
     total_amount = sum(r["amount"] or 0 for r in results)
+    if agency == "all":
+        sources = "NIH + NSF + DOE + USDA + NASA + DARPA"
+    else:
+        sources = agency.upper()
     header = (
         f"## Grant Search: \"{keyword}\" ({year})\n"
-        f"Found **{len(results)} grants** across "
-        f"{'NIH + NSF' if agency == 'all' else agency.upper()} "
+        f"Found **{len(results)} grants** across **{sources}** "
         f"totaling **{formatters.fmt_amount(total_amount)}**\n\n"
-        f"> _Note: Results are unfiltered keyword matches from the APIs — "
+        f"> _Note: Results are keyword matches from public APIs — "
         f"some may be loosely related to your search term._\n"
     )
 
@@ -250,7 +263,7 @@ async def search_by_institution(
 
     Args:
         institution_name: Name of the institution (e.g. "Johns Hopkins University")
-        agency:           Source — "all", "nih", or "nsf" (default: "all")
+        agency:           Source — "all", "nih", "nsf", "doe", "usda", "nasa", "darpa" (default: "all")
         year:             Fiscal/award year to filter by (default: 2024)
     """
     agency = agency.lower()
@@ -272,6 +285,15 @@ async def search_by_institution(
             )
         except Exception as exc:
             errors.append(f"NSF search failed: {exc}")
+
+    usa_targets = [a for a in USA_AGENCIES if agency in ("all", a)]
+    if usa_targets:
+        try:
+            results.extend(
+                await usaspending.search("", agencies=usa_targets, year=year, institution=institution_name, limit=25)
+            )
+        except Exception as exc:
+            errors.append(f"USASpending search failed: {exc}")
 
     if not results:
         note = ("\n\n" + "\n".join(f"- {e}" for e in errors)) if errors else ""
@@ -373,7 +395,12 @@ async def get_funding_trends(
     trend_rows: list[dict] = []
 
     for year in years:
-        row: dict = {"year": year, "nih_count": 0, "nih_total": 0, "nsf_count": 0, "nsf_total": 0}
+        row: dict = {
+            "year": year,
+            "nih_count": 0, "nih_total": 0,
+            "nsf_count": 0, "nsf_total": 0,
+            "other_count": 0, "other_total": 0,
+        }
 
         try:
             nih_data = await nih.search_by_year(keyword, year)
@@ -388,6 +415,15 @@ async def get_funding_trends(
             row["nsf_total"] = nsf_data["total"]
         except Exception as exc:
             errors.append(f"NSF {year}: {exc}")
+
+        try:
+            usa_data = await usaspending.search_by_year(
+                keyword, year, agencies=list(USA_AGENCIES)
+            )
+            row["other_count"] = usa_data["count"]
+            row["other_total"] = usa_data["total"]
+        except Exception as exc:
+            errors.append(f"USASpending {year}: {exc}")
 
         trend_rows.append(row)
 

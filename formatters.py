@@ -79,16 +79,21 @@ def fmt_trends(keyword: str, rows: list[dict]) -> str:
 
     header = f"## Funding Trends: {keyword}\n"
     table_lines = [
-        "| Year | NIH Grants | NIH Total | NSF Grants | NSF Total | Combined Total |",
-        "|------|-----------|-----------|-----------|-----------|----------------|",
+        "| Year | NIH | NIH Total | NSF | NSF Total | DOE/USDA/NASA/DARPA | Other Total | Grand Total |",
+        "|------|-----|-----------|-----|-----------|---------------------|-------------|-------------|",
     ]
     for row in rows:
+        other_count = row.get("other_count", 0)
+        other_total = row.get("other_total", 0)
+        grand = row["nih_total"] + row["nsf_total"] + other_total
         table_lines.append(
             f"| {row['year']} "
             f"| {row['nih_count']} "
             f"| {fmt_amount(row['nih_total'])} "
             f"| {row['nsf_count']} "
             f"| {fmt_amount(row['nsf_total'])} "
-            f"| {fmt_amount(row['nih_total'] + row['nsf_total'])} |"
+            f"| {other_count} "
+            f"| {fmt_amount(other_total)} "
+            f"| {fmt_amount(grand)} |"
         )
     return header + "\n".join(table_lines)
