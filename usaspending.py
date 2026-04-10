@@ -80,6 +80,9 @@ def _build_payload(
     if recipient:
         filters["recipient_search_text"] = [recipient]
 
+    if institution:
+        filters["recipient_search_text"] = [institution]
+
     return {
         "filters": filters,
         "fields": FIELDS,
