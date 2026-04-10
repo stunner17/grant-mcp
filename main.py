@@ -299,6 +299,19 @@ async def search_by_institution(
         note = ("\n\n" + "\n".join(f"- {e}" for e in errors)) if errors else ""
         return f"No grants found for **{institution_name}** in {year}.{note}"
 
+    # Post-filter: only keep results where institution name loosely matches
+    name_words = [w.lower() for w in institution_name.split() if len(w) > 3]
+    if name_words:
+        matched = [
+            r for r in results
+            if any(w in (r.get("institution") or "").lower() for w in name_words)
+        ]
+        if matched:
+            removed = len(results) - len(matched)
+            results = matched
+            if removed > 0:
+                errors.append(f"{removed} result(s) from other institutions filtered out.")
+
     total = sum(r["amount"] or 0 for r in results)
     # Group by department where available
     by_dept: dict[str, list[dict]] = {}
