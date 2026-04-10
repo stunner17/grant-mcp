@@ -1,5 +1,6 @@
 """NIH Reporter v2 API client."""
 
+import asyncio
 import httpx
 from typing import Any
 
@@ -37,6 +38,34 @@ def _pi_names(pi_list: list[dict] | None) -> str:
         last = pi.get("last_name", "")
         names.append(f"{first} {last}".strip())
     return ", ".join(names) if names else "N/A"
+
+
+async def _post_with_retry(payload: dict, retries: int = 3) -> dict:
+    """POST to NIH Reporter with exponential backoff retries."""
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(BASE_URL, json=payload, headers=HEADERS)
+                if resp.status_code == 500:
+                    raise httpx.HTTPStatusError(
+                        f"NIH Reporter returned 500 (attempt {attempt + 1}/{retries}) — "
+                        "the NIH API may be temporarily unavailable.",
+                        request=resp.request,
+                        response=resp,
+                    )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+        except httpx.RequestError as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+
+    raise last_exc or RuntimeError("NIH Reporter request failed after retries")
 
 
 async def search(
@@ -81,11 +110,7 @@ async def search(
         "fields": DEFAULT_FIELDS,
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(BASE_URL, json=payload, headers=HEADERS)
-        resp.raise_for_status()
-        data = resp.json()
-
+    data = await _post_with_retry(payload)
     results = data.get("results", [])
     parsed = []
     for r in results:
@@ -126,11 +151,7 @@ async def search_by_year(keyword: str, year: int) -> dict[str, Any]:
         "fields": ["award_amount", "fiscal_year"],
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(BASE_URL, json=payload, headers=HEADERS)
-        resp.raise_for_status()
-        data = resp.json()
-
+    data = await _post_with_retry(payload)
     results = data.get("results", [])
     total = sum(r.get("award_amount") or 0 for r in results)
     return {"count": len(results), "total": total, "year": year}

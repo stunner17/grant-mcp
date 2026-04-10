@@ -80,7 +80,9 @@ async def search_grants(
         f"## Grant Search: \"{keyword}\" ({year})\n"
         f"Found **{len(results)} grants** across "
         f"{'NIH + NSF' if agency == 'all' else agency.upper()} "
-        f"totaling **{formatters.fmt_amount(total_amount)}**\n"
+        f"totaling **{formatters.fmt_amount(total_amount)}**\n\n"
+        f"> _Note: Results are unfiltered keyword matches from the APIs — "
+        f"some may be loosely related to your search term._\n"
     )
 
     rows = [
