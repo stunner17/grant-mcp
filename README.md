@@ -18,19 +18,23 @@ An MCP (Model Context Protocol) server that lets AI agents search and analyze re
 - Grants.gov
 - USASpending.gov (used for DOE, USDA, NASA, and DARPA)
 
-## Setup
+## Using the hosted server
+
+A live instance is already deployed on Render at:
+
+```
+https://grant-mcp.onrender.com/mcp
+```
+
+Add it to your MCP-compatible client (e.g. Claude Code, Claude Desktop) as a remote/URL-based MCP server pointing at that endpoint — no local install required. A health check is available at the root (`https://grant-mcp.onrender.com/`).
+
+## Running your own instance
+
+To run the server locally or deploy your own copy:
 
 ```bash
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The server exposes the MCP endpoint at `/mcp` and a health check at `/`.
-
-## Deployment
-
-Includes a `render.yaml` for one-click deployment to [Render](https://render.com).
-
-## Connecting to an MCP client
-
-Point your MCP-compatible client (e.g. Claude) at the server's `/mcp` endpoint to enable the tools above.
+This exposes the MCP endpoint at `/mcp` and the health check at `/`. A `render.yaml` is included for one-click deployment to [Render](https://render.com).
